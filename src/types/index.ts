@@ -288,6 +288,8 @@ export interface SessionCloseParams {
   capture_transcript?: boolean;
   /** Explicit transcript file path (overrides automatic detection) */
   transcript_path?: string;
+  /** GIT-122: replace an existing close. Without it, closing a closed session is refused. */
+  reclose?: boolean;
 }
 
 export interface CloseCompliance {
@@ -300,6 +302,8 @@ export interface CloseCompliance {
   scars_applied: number;
   ceremony_duration_ms?: number; // Optional: end-to-end ceremony duration
   retroactive?: boolean; // Optional: marks sessions created post-mortem
+  /** GIT-122: the session saved but some threads did not sync; the close may be retried. */
+  partial_persist?: boolean;
 }
 
 /**

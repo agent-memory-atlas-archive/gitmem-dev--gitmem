@@ -107,6 +107,7 @@ export const SessionCloseParamsSchema = z.object({
   scars_to_record: z.array(ScarUsageEntrySchema).optional(),
   capture_transcript: z.boolean().optional(),
   transcript_path: SafeTranscriptPathSchema.optional(),
+  reclose: z.boolean().optional(),
 });
 
 export type SessionCloseParams = z.infer<typeof SessionCloseParamsSchema>;

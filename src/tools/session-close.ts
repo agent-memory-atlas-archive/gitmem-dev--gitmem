@@ -44,7 +44,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { getGitmemPath, getGitmemDir, getSessionPath, getSessionDir } from "../services/gitmem-dir.js";
-import { unregisterSession, findSessionByHostPid, findSessionById } from "../services/active-sessions.js";
+import { unregisterSession, findSessionByHostPid, findSessionById, listActiveSessions } from "../services/active-sessions.js";
 import { loadSuggestions, saveSuggestions, detectSuggestedThreads, loadRecentSessionEmbeddings } from "../services/thread-suggestions.js";
 import { writeAgentBriefing } from "../services/agent-briefing.js";
 import type {
@@ -244,6 +244,12 @@ async function sessionCloseFree(
   try {
     // Load existing session if available
     const existingSession = await storage.get<Record<string, unknown>>("sessions", sessionId);
+    // GIT-122: same rule as the Pro path — no silent second close.
+    if (existingSession?.close_compliance && !params.reclose) {
+      return refuseClose(params, sessionId,
+        `Session ${sessionId.slice(0, 8)} is already closed. Nothing was written. ` +
+          `To replace its close, call again with reclose: true.`, timer);
+    }
 
     const sessionData: Record<string, unknown> = {
       ...(existingSession || {}),
@@ -386,7 +392,7 @@ function formatCloseDisplay(
   if (stats.length > 0) {
     lines.push(stats.join(" · "));
   }
-  lines.push(dimText(`${sessionId.slice(0, 8)} · ${compliance.agent} · ${compliance.close_type}`));
+  lines.push(dimText(`${sessionId} · ${compliance.agent} · ${compliance.close_type}`));
 
   // Errors — only on failure
   if (!success && errors?.length) {
@@ -528,6 +534,41 @@ const SHORT_ID_REGEX = /^[0-9a-f]{8}$/i;
 
 function isValidSessionId(id: string): boolean {
   return UUID_REGEX.test(id) || SHORT_ID_REGEX.test(id);
+}
+
+/**
+ * GIT-122: does the id that was written match the id the caller asked for?
+ * The short form (8 hex) names the session whose full id starts with it.
+ */
+function sessionIdsMatch(requested: string, resolved: string): boolean {
+  const a = requested.toLowerCase();
+  const b = resolved.toLowerCase();
+  return a === b || (SHORT_ID_REGEX.test(a) && b.startsWith(a)) || (SHORT_ID_REGEX.test(b) && a.startsWith(b));
+}
+
+/** GIT-122: a close that is refused before anything is written. */
+function refuseClose(
+  params: SessionCloseParams,
+  sessionId: string,
+  error: string,
+  timer: Timer,
+): SessionCloseResult {
+  console.error(`[session_close] REFUSED: ${error}`);
+  return {
+    ...notStored(),
+    session_id: sessionId,
+    close_compliance: {
+      close_type: params.close_type,
+      agent: "Unknown",
+      checklist_displayed: false,
+      questions_answered_by_agent: false,
+      human_asked_for_corrections: false,
+      learnings_stored: 0,
+      scars_applied: 0,
+    },
+    validation_errors: [error],
+    performance: buildPerformanceData("session_close", timer.stop(), 0),
+  };
 }
 
 /**
@@ -910,6 +951,12 @@ export async function sessionClose(
   const timer = new Timer();
   const metricsId = uuidv4();
 
+  // GIT-122: the id the caller asked for, before any merge or recovery can
+  // touch params. An explicit id is either the session that gets closed or the
+  // call is refused. Logged raw so the next occurrence is diagnosable.
+  const requestedId: string | undefined = params.session_id || undefined;
+  console.error(`[session_close] incoming session_id=${requestedId ?? "(none)"}`);
+
   // Validate session_id format before any DB calls
   if (params.session_id && !isValidSessionId(params.session_id)) {
     const latencyMs = timer.stop();
@@ -935,6 +982,25 @@ export async function sessionClose(
 
   // GIT-21: Recover session_id from active-sessions registry (hostname+PID) or legacy file
   if (!params.session_id && params.close_type !== "retroactive") {
+    // GIT-122 (GIT-103 rule 3): with no id and more than one live session on
+    // this machine, "the current session" is a guess. Guessing closed the wrong
+    // row on 2026-10-04. Refuse and name the candidates.
+    try {
+      const live = listActiveSessions();
+      if (live.length > 1) {
+        const ids = live.map((x) => x.session_id.slice(0, 8)).join(", ");
+        return refuseClose(
+          params,
+          "",
+          `No session_id provided and ${live.length} sessions are live on this machine (${ids}). ` +
+            `Pass session_id explicitly so the close lands on the session you mean.`,
+          timer,
+        );
+      }
+    } catch (error) {
+      console.warn("[session_close] Failed to list live sessions:", error);
+    }
+
     // Try registry first (GIT-20 writes here).
     // GIT-51: resolveCurrentSession() also adopts a session orphaned by an MCP
     // restart, so close still finds the original session_id after a restart.
@@ -980,10 +1046,33 @@ export async function sessionClose(
     };
   }
 
-  // 0a. File-based payload handoff: if .gitmem/closing-payload.json exists,
-  // merge it with inline params (inline params take precedence).
-  // This keeps the visible MCP tool call small: just session_id + close_type.
-  const payloadPath = getGitmemPath("closing-payload.json");
+  // 0a. File-based payload handoff: merge the closing payload with inline
+  // params (inline params take precedence). This keeps the visible MCP tool
+  // call small: just session_id + close_type.
+  //
+  // GIT-122: the payload lives in the closing session's own folder,
+  // <gitmem>/sessions/<id>/closing-payload.json. The old single file at the
+  // .gitmem root is shared by every session on the machine, so one session's
+  // close merged and deleted another's payload. The root file is still read for
+  // one release, and only when exactly one session is live, so nobody is
+  // handed a payload that might belong to someone else.
+  const legacyPayloadPath = getGitmemPath("closing-payload.json");
+  const scopedPayloadPath = params.session_id
+    ? path.join(getGitmemDir(), "sessions", params.session_id, "closing-payload.json")
+    : null;
+  let payloadPath = scopedPayloadPath ?? legacyPayloadPath;
+  let legacyPayloadSkipped = false;
+  if (scopedPayloadPath && !fs.existsSync(scopedPayloadPath) && fs.existsSync(legacyPayloadPath)) {
+    let liveCount = 0;
+    try { liveCount = listActiveSessions().length; } catch { /* registry unreadable: treat as unknown */ }
+    if (liveCount <= 1) {
+      payloadPath = legacyPayloadPath;
+      console.error(`[session_close] Using legacy ${legacyPayloadPath}; write payloads to ${scopedPayloadPath}`);
+    } else {
+      legacyPayloadSkipped = true;
+      console.error(`[session_close] Ignoring legacy ${legacyPayloadPath}: ${liveCount} sessions are live and it carries no owner`);
+    }
+  }
   let payloadConsumed = false;
   let payloadReadError: string | null = null;
   // Whether the session row reached the durable store. Set only after the
@@ -993,6 +1082,17 @@ export async function sessionClose(
   try {
     if (fs.existsSync(payloadPath)) {
       const filePayload = JSON.parse(fs.readFileSync(payloadPath, "utf-8")) as Partial<SessionCloseParams>;
+      // GIT-122: the payload must not carry another session's identity.
+      if (filePayload.session_id && params.session_id && !sessionIdsMatch(filePayload.session_id, params.session_id)) {
+        return refuseClose(
+          params,
+          params.session_id,
+          `${path.resolve(payloadPath)} belongs to session ${filePayload.session_id.slice(0, 8)}, ` +
+            `but this call closes ${params.session_id.slice(0, 8)}. Nothing was written. ` +
+            `Move the payload into the right session's folder or remove it.`,
+          timer,
+        );
+      }
       // File provides defaults; inline params override
       params = { ...filePayload, ...params };
       payloadConsumed = true;
@@ -1028,7 +1128,10 @@ export async function sessionClose(
       validation_errors: [
         payloadReadError ??
           `closing-payload.json not found at ${path.resolve(payloadPath)}. ` +
-          `Write the closing payload to exactly that path (or pass closing_reflection inline), then call session_close again.`,
+          `Write the closing payload to exactly that path (or pass closing_reflection inline), then call session_close again.` +
+          (legacyPayloadSkipped
+            ? ` A payload at ${path.resolve(legacyPayloadPath)} was ignored because several sessions are live and that file has no owner.`
+            : ""),
       ],
       performance: buildPerformanceData("session_close", timer.stop(), 0),
     };
@@ -1401,6 +1504,29 @@ export async function sessionClose(
         performance: perfData,
       };
     }
+
+    // GIT-122: the invariant. Refuse, before thread sync or any write, if the
+    // session about to be written is not the one that was asked for, or the row
+    // found is some other row.
+    if (requestedId && !sessionIdsMatch(requestedId, sessionId)) {
+      return refuseClose(params, sessionId,
+        `Requested session ${requestedId} but the close resolved to ${sessionId}. Nothing was written.`, timer);
+    }
+    const foundId = existingSession.id;
+    if (typeof foundId === "string" && foundId !== sessionId) {
+      return refuseClose(params, sessionId,
+        `Session lookup for ${sessionId} returned the record of ${foundId}. Nothing was written.`, timer);
+    }
+
+    // GIT-122: a session that already has a close is not closed again by
+    // accident. 2026-10-04 overwrote ed6b400e's close (scars_applied 3 → 6).
+    // A close that only partly persisted (threads not synced) stays retryable.
+    const priorClose = existingSession.close_compliance as Record<string, unknown> | null | undefined;
+    if (priorClose && !priorClose.partial_persist && !params.reclose) {
+      return refuseClose(params, sessionId,
+        `Session ${sessionId.slice(0, 8)} is already closed. Nothing was written. ` +
+          `To replace its close, call again with reclose: true.`, timer);
+    }
   }
 
   // 5. Build session data (merge with existing or create from scratch)
@@ -1453,6 +1579,10 @@ export async function sessionClose(
       };
     }
   }
+
+  // GIT-122: a close whose threads did not all land is retryable; mark the row
+  // so the already-closed refusal lets the retry through.
+  if (!threadSync.all_synced) closeCompliance.partial_persist = true;
 
   // Prune threads.json: only keep open threads — ONLY if the durable store
   // agrees. A partial sync means the local file is the only record of the
@@ -1575,6 +1705,14 @@ export async function sessionClose(
     // provisioned from setup.sql they used to fail the entire close with PGRST204.
     const sessionsTable = getTableName("sessions");
     const sessionRow = await filterToStoreSessionColumns(sessionData, sessionsTable);
+    // GIT-122: assert on the row id about to be written, not on a promise that
+    // resolves. COMPLETE for the wrong row is the failure this guards.
+    // Retroactive closes write a new row under a fresh id on purpose.
+    if (sessionRow.id !== sessionId || (!isRetroactive && requestedId && !sessionIdsMatch(requestedId, String(sessionRow.id)))) {
+      throw new Error(
+        `refusing to write: row id ${String(sessionRow.id)} does not match the session being closed (${sessionId}, requested ${requestedId ?? "none"})`
+      );
+    }
     await Promise.all([
       supabase.directUpsert(sessionsTable, sessionRow),
       blindspotPromise,

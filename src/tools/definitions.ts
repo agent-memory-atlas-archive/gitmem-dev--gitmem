@@ -205,6 +205,10 @@ export const TOOLS = [
           type: "number",
           description: "End-to-end ceremony duration from agent perspective (in milliseconds)",
         },
+        reclose: {
+          type: "boolean",
+          description: "Replace the close of a session that is already closed. Without it, closing a closed session is refused.",
+        },
       },
       required: ["session_id", "close_type"],
     },
