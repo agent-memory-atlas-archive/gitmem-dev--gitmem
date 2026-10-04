@@ -385,7 +385,8 @@ async function flow() {
 
   // GIT-99: a standard close with no payload file and no inline reflection
   // names the absolute path this server reads, instead of "requires N answers".
-  const expectedPayloadPath = join(gitmemDir, "closing-payload.json");
+  // GIT-122: the payload lives in the closing session's own folder.
+  const expectedPayloadPath = join(gitmemDir, "sessions", sessionId, "closing-payload.json");
   const scNoPayload = await step("session_close", { session_id: sessionId, close_type: "standard" });
   const missingPayloadNamed = scNoPayload.includes(`closing-payload.json not found at ${expectedPayloadPath}`)
     && !/requires closing_reflection|requires task_completion/.test(scNoPayload);
