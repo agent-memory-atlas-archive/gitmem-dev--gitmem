@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `session_close` no longer reports every open thread as failed when a session is closed a second
+  time (or closed after the server restarted). Threads stored on the session row come back as JSON
+  strings, and they were handed to the Supabase thread sync without being parsed, so each one had no
+  id and the sync threw `Cannot read properties of undefined (reading 'includes')`. The close
+  returned `PARTIAL` with `undefined (...)` entries for all of them. The stored threads are now
+  parsed first, and a thread with no id fails with a clear message instead of an opaque error.
+  No data was lost: the unsynced threads stayed in `threads.json` and were retried by the next close.
+
 ## [1.11.1] - 2026-09-22
 
 **Just upgrade the package. Nothing to change on your database.** Every fix below works on a project
