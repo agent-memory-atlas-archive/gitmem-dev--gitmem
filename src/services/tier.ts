@@ -96,11 +96,6 @@ export function hasEmbeddings(): boolean {
   return getTier() !== "free";
 }
 
-/** Whether session close compliance validation is active (dev only) */
-export function hasCompliance(): boolean {
-  return getTier() === "dev";
-}
-
 /**
  * Whether scar variant A/B testing is active (dev only).
  *
@@ -137,21 +132,6 @@ export function hasProInsights(): boolean {
 /** Whether detailed performance metrics recording is active (pro, dev) */
 export function hasMetrics(): boolean {
   return getTier() !== "free";
-}
-
-/** Whether advanced agent detection (5-agent matrix) is active (dev only) */
-export function hasAdvancedAgentDetection(): boolean {
-  return getTier() === "dev";
-}
-
-/** Whether multi-project support is active (dev only) */
-export function hasMultiProject(): boolean {
-  return getTier() === "dev";
-}
-
-/** Whether LLM-cooperative enforcement fields are generated (dev only) */
-export function hasEnforcementFields(): boolean {
-  return getTier() === "dev";
 }
 
 /**
