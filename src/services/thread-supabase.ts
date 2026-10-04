@@ -671,6 +671,16 @@ export async function syncThreadsToSupabase(
   }
 
   for (const thread of threads) {
+    // A thread without an id cannot be looked up or written, and an undefined id used to reach
+    // directQuery as the filter { thread_id: undefined }, which threw an unhelpful "Cannot read
+    // properties of undefined (reading 'includes')" for every such thread. Name the real problem.
+    if (!thread || typeof thread.id !== "string" || thread.id.length === 0) {
+      const got = typeof thread === "string" ? "a raw string" : thread ? "an object with no id" : String(thread);
+      const message = `thread has no id (expected a ThreadObject, got ${got})`;
+      console.error(`[thread-supabase] Skipping thread: ${message}`);
+      failed.push({ id: "(no id)", error: message });
+      continue;
+    }
     try {
       // Check if thread exists in Supabase by ID
       const existing = await supabase.directQuery<ThreadRow>(getTableName("threads"), {

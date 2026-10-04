@@ -1421,7 +1421,15 @@ export async function sessionClose(
   // there is no sync to await — `skipped: true`, and the prune proceeds on
   // local persistence alone. Awaiting a sync that does not exist would
   // fail-close every free user's session close.
-  const closeThreads = (sessionData.open_threads || []) as ThreadObject[];
+  // open_threads can still be raw here: orchestra_sessions.open_threads is a text[] whose
+  // elements are JSON-encoded threads, and on a re-close with no new threads and no in-memory
+  // thread state the stored strings flow through buildSessionRecord untouched. Casting them to
+  // ThreadObject left thread.id undefined for every thread, and the sync threw on the undefined
+  // filter value. normalizeThreads parses JSON strings and migrates plain-text ones.
+  const closeThreads = normalizeThreads(
+    (sessionData.open_threads || []) as (string | ThreadObject)[],
+    sessionId,
+  );
   let threadSync: ThreadSyncResult = {
     attempted: 0, synced: [], failed: [], skipped: true, all_synced: true,
     dedup_coverage: "complete", dedup_candidates: 0,

@@ -117,6 +117,29 @@ describe("outcome reporting", () => {
     expect(r.failed[0].error).toContain("boom");
   });
 
+  it("fails a thread that has no id with a clear message, without querying Supabase", async () => {
+    // Regression: stringified threads reached the sync as raw strings, so thread.id was undefined
+    // and directQuery threw "Cannot read properties of undefined (reading 'includes')".
+    mockDirectQuery.mockResolvedValue([]);
+    const noId = { text: "orphan", status: "open", created_at: "2026-08-06T00:00:00.000Z" };
+
+    const r = await syncThreadsToSupabase(
+      [noId as never, '{"id":"t-raw"}' as never, thread("t-ok")],
+      "gitmem",
+      "s-1"
+    );
+
+    expect(r.attempted).toBe(3);
+    expect(r.synced).toEqual(["t-ok"]);           // the valid thread still syncs
+    expect(r.failed).toHaveLength(2);
+    expect(r.failed[0].error).toContain("thread has no id");
+    expect(r.failed[1].error).toContain("a raw string");
+    expect(r.failed.map((f) => f.id)).toEqual(["(no id)", "(no id)"]);
+    expect(r.failed.some((f) => f.error.includes("includes"))).toBe(false);
+    // only the valid thread was looked up by id
+    expect(mockDirectQuery).toHaveBeenCalledTimes(1);
+  });
+
   it("continues past a failure and reports the partial split", async () => {
     // A partial sync is still worth completing — but the miss must be named,
     // because the local file is the only remaining record of it.
