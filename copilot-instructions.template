@@ -61,6 +61,7 @@ Safe alternatives: `env | grep -c VARNAME` (count only), `[ -n "$VARNAME" ] && e
    Payload schema (`.gitmem/closing-payload.json`):
    ```json
    {
+     "session_id": "<your session id from session_start>",
      "closing_reflection": {
        "what_broke": "...",
        "what_took_longer": "...",

@@ -1070,11 +1070,15 @@ export async function sessionClose(
   // call small: just session_id + close_type.
   //
   // GIT-122: the payload lives in the closing session's own folder,
-  // <gitmem>/sessions/<id>/closing-payload.json. The old single file at the
-  // .gitmem root is shared by every session on the machine, so one session's
-  // close merged and deleted another's payload. The root file is still read for
-  // one release, and only when exactly one session is live, so nobody is
-  // handed a payload that might belong to someone else.
+  // <gitmem>/sessions/<id>/closing-payload.json, and that wins when present.
+  // The single file at the .gitmem root is shared by every session on the
+  // machine, so one session's close used to merge and delete another's payload.
+  // The Stop hook and the init templates still name the root file, so it is
+  // still read (for one release), under one rule: it must say whose it is.
+  //   - it names this session (`session_id`)  -> used, however many sessions are live;
+  //   - it names another session              -> refused (below);
+  //   - it names nobody                       -> used only while a single session
+  //                                              is live, otherwise ignored.
   const legacyPayloadPath = getGitmemPath("closing-payload.json");
   const scopedPayloadPath = params.session_id
     ? path.join(getGitmemDir(), "sessions", params.session_id, "closing-payload.json")
@@ -1082,15 +1086,7 @@ export async function sessionClose(
   let payloadPath = scopedPayloadPath ?? legacyPayloadPath;
   let legacyPayloadSkipped = false;
   if (scopedPayloadPath && !fs.existsSync(scopedPayloadPath) && fs.existsSync(legacyPayloadPath)) {
-    let liveCount = 0;
-    try { liveCount = listActiveSessions().length; } catch { /* registry unreadable: treat as unknown */ }
-    if (liveCount <= 1) {
-      payloadPath = legacyPayloadPath;
-      console.error(`[session_close] Using legacy ${legacyPayloadPath}; write payloads to ${scopedPayloadPath}`);
-    } else {
-      legacyPayloadSkipped = true;
-      console.error(`[session_close] Ignoring legacy ${legacyPayloadPath}: ${liveCount} sessions are live and it carries no owner`);
-    }
+    payloadPath = legacyPayloadPath;
   }
   let payloadConsumed = false;
   let payloadReadError: string | null = null;
@@ -1112,12 +1108,26 @@ export async function sessionClose(
           timer,
         );
       }
-      // File provides defaults; inline params override
-      params = { ...filePayload, ...params };
-      payloadConsumed = true;
-      console.error(`[session_close] Loaded closing payload from ${payloadPath}`);
-      // Payload file is cleaned up AFTER successful close (see end of function).
-      // If the tool crashes, the payload survives for retry.
+      let ownerless = false;
+      if (payloadPath === legacyPayloadPath && scopedPayloadPath && !filePayload.session_id) {
+        let liveCount = 0;
+        try { liveCount = listActiveSessions().length; } catch { /* registry unreadable: treat as unknown */ }
+        ownerless = liveCount > 1;
+        if (ownerless) {
+          legacyPayloadSkipped = true;
+          console.error(`[session_close] Ignoring ${legacyPayloadPath}: ${liveCount} sessions are live and it names no session_id`);
+        } else {
+          console.error(`[session_close] Using legacy ${legacyPayloadPath}; write payloads to ${scopedPayloadPath}`);
+        }
+      }
+      if (!ownerless) {
+        // File provides defaults; inline params override
+        params = { ...filePayload, ...params };
+        payloadConsumed = true;
+        console.error(`[session_close] Loaded closing payload from ${payloadPath}`);
+        // Payload file is cleaned up AFTER successful close (see end of function).
+        // If the tool crashes, the payload survives for retry.
+      }
     }
   } catch (error) {
     console.warn("[session_close] Failed to read closing-payload.json:", error);
@@ -1146,10 +1156,10 @@ export async function sessionClose(
       },
       validation_errors: [
         payloadReadError ??
-          `closing-payload.json not found at ${path.resolve(payloadPath)}. ` +
+          `closing-payload.json not found at ${path.resolve(legacyPayloadSkipped && scopedPayloadPath ? scopedPayloadPath : payloadPath)}. ` +
           `Write the closing payload to exactly that path (or pass closing_reflection inline), then call session_close again.` +
           (legacyPayloadSkipped
-            ? ` A payload at ${path.resolve(legacyPayloadPath)} was ignored because several sessions are live and that file has no owner.`
+            ? ` A payload at ${path.resolve(legacyPayloadPath)} was ignored because several sessions are live and it has no \"session_id\" field naming this session; add \"session_id\": \"${params.session_id}\" to it, or write it to the path above.`
             : ""),
       ],
       performance: buildPerformanceData("session_close", timer.stop(), 0),

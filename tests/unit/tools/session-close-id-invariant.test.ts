@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { execFileSync } from "child_process";
 
 const root = vi.hoisted(() => ({ dir: "" }));
 const live = vi.hoisted(() => ({ list: (..._a: unknown[]): unknown[] => [] }));
@@ -334,6 +335,87 @@ describe("closing payload is scoped per session (GIT-122)", () => {
     expect(result.success).toBe(false);
     expect(written()).toEqual([]);
     expect(fs.existsSync(path.join(root.dir, "closing-payload.json"))).toBe(true);
+    expect(result.validation_errors![0]).toContain(`closing-payload.json not found at ${path.join(sessionDir(A), "closing-payload.json")}`);
+    expect(result.validation_errors![0]).toMatch(/was ignored because several sessions are live/);
+  });
+
+  it("two live sessions, root payload naming this session: used, then removed", async () => {
+    store.rows[A] = open(A);
+    store.rows[B] = open(B);
+    live.list = () => [{ session_id: A }, { session_id: B }];
+    writePayload(path.join(root.dir, "closing-payload.json"), { session_id: A, closing_reflection: reflection("root-A-reflection") });
+
+    const result = await sessionClose({ session_id: A, close_type: "standard" });
+
+    expect(written()).toEqual([A]);
+    expect(JSON.stringify(store.upserts[0])).toContain("root-A-reflection");
+    expect(result.success).toBe(true);
+    expect(fs.existsSync(path.join(root.dir, "closing-payload.json"))).toBe(false);
+  });
+
+  it("two live sessions, root payload naming the other session: refused, file kept", async () => {
+    store.rows[A] = open(A);
+    store.rows[B] = open(B);
+    live.list = () => [{ session_id: A }, { session_id: B }];
+    writePayload(path.join(root.dir, "closing-payload.json"), { session_id: B, closing_reflection: reflection("root-B-reflection") });
+
+    const result = await sessionClose({ session_id: A, close_type: "standard", closing_reflection: reflection("A-inline") });
+
+    expect(result.success).toBe(false);
+    expect(written()).toEqual([]);
+    expect(fs.existsSync(path.join(root.dir, "closing-payload.json"))).toBe(true);
+  });
+
+  it("the per-session payload still wins over a root payload", async () => {
+    store.rows[A] = open(A);
+    live.list = () => [{ session_id: A }, { session_id: B }];
+    writePayload(path.join(sessionDir(A), "closing-payload.json"), { closing_reflection: reflection("scoped-reflection") });
+    writePayload(path.join(root.dir, "closing-payload.json"), { session_id: A, closing_reflection: reflection("root-reflection") });
+
+    await sessionClose({ session_id: A, close_type: "standard" });
+
+    expect(JSON.stringify(store.upserts[0])).toContain("scoped-reflection");
+    expect(JSON.stringify(store.upserts[0])).not.toContain("root-reflection");
+  });
+});
+
+describe("the Stop hook's instruction and the server's reader agree (GIT-122)", () => {
+  const HOOK = path.join(__dirname, "../../../hooks/scripts/session-close-check.sh");
+
+  it("following the hook's instruction with two live sessions closes the right one", async () => {
+    store.rows[A] = open(A);
+    store.rows[B] = open(B);
+    live.list = () => [{ session_id: A }, { session_id: B }];
+    fs.writeFileSync(path.join(root.dir, "active-sessions.json"), JSON.stringify({ sessions: [{ session_id: A }, { session_id: B }] }));
+
+    const hookSession = `git122-${process.pid}`;
+    const state = `/tmp/gitmem-hooks-${hookSession}`;
+    fs.mkdirSync(state, { recursive: true });
+    fs.writeFileSync(path.join(state, "tool_call_count"), "10");
+    fs.writeFileSync(path.join(state, "start_time"), String(Math.floor(Date.now() / 1000) - 600));
+    let reason: string;
+    try {
+      const out = execFileSync("bash", [HOOK], {
+        input: "{}",
+        env: { PATH: process.env.PATH!, HOME: root.dir, GITMEM_DIR: root.dir, CLAUDE_SESSION_ID: hookSession },
+      }).toString();
+      reason = JSON.parse(out).reason;
+    } finally {
+      fs.rmSync(state, { recursive: true, force: true });
+    }
+
+    // What the hook tells the agent to do...
+    const target = /WRITE structured payload to (\S+) \(this exact absolute path/.exec(reason)![1];
+    expect(reason).toContain('with "session_id" (YOUR session id from session_start');
+    // ...done literally: the path it names, with this session's id in it.
+    writePayload(target, { session_id: A, closing_reflection: reflection("hook-instructed") });
+
+    // The server reads exactly that file.
+    const result = await sessionClose({ session_id: A, close_type: "standard" });
+
+    expect(written()).toEqual([A]);
+    expect(JSON.stringify(store.upserts[0])).toContain("hook-instructed");
+    expect(result.success).toBe(true);
   });
 });
 

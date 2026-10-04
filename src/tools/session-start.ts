@@ -66,6 +66,9 @@ import type {
  * know the exact field names for closing-payload.json without guessing.
  */
 const CLOSING_PAYLOAD_SCHEMA: Record<string, unknown> = {
+  // GIT-122: name your session. A payload at the shared root is read only if it says whose it is
+  // (always, or when a single session is live); concurrent sessions would otherwise read each other's.
+  session_id: "this session's id, from session_start",
   closing_reflection: {
     what_broke: "Q1: What broke that you didn't expect?",
     what_took_longer: "Q2: What took longer than it should have?",

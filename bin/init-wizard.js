@@ -458,6 +458,7 @@ async function stepMemoryStore() {
   const payloadPath = join(storeDir, "closing-payload.json");
   if (!existsSync(payloadPath)) {
     writeJson(payloadPath, {
+      session_id: "",
       closing_reflection: {
         what_broke: "",
         what_took_longer: "",
@@ -525,6 +526,7 @@ async function stepMemoryStore() {
   const templatePath = join(storeDir, "closing-payload-template.json");
   if (!existsSync(templatePath)) {
     writeJson(templatePath, {
+      session_id: "your session id from session_start (required)",
       closing_reflection: {
         what_broke: "", what_took_longer: "", do_differently: "",
         what_worked: "", wrong_assumption: "", scars_applied: [],

@@ -67,6 +67,7 @@ On "closing", "done for now", or "wrapping up":
    Payload schema (`.gitmem/closing-payload.json`):
    ```json
    {
+     "session_id": "<your session id from session_start>",
      "closing_reflection": {
        "what_broke": "...",
        "what_took_longer": "...",
