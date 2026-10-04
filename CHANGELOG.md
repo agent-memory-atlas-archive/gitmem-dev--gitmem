@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Running the e2e suite no longer deletes your real `~/.gitmem`. `cursor-cross-tool.test.ts` ran
+  `gitmem uninstall --all` with your real HOME, and `--all` removes the memory store (session
+  registry, per-session files, local `threads.json`, closing payloads). Those tests now run against
+  a scratch HOME, and every e2e helper is guarded: any gitmem CLI or server process whose store
+  resolves outside `os.tmpdir()` is refused before it starts. The other e2e files that used your
+  real store (`pro-fresh`, `pro-mature`, `user-journey`, `organic-discovery`, `git-120`) are
+  sandboxed too, and the cursor tests assert the GIT-115 layout. Test-only change; the product
+  and `uninstall --all` are unchanged. (GIT-123)
 - `session_close` no longer reports every open thread as failed when a session is closed a second
   time (or closed after the server restarted). Threads stored on the session row come back as JSON
   strings, and they were handed to the Supabase thread sync without being parsed, so each one had no

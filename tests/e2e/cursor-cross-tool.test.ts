@@ -29,6 +29,14 @@ const execFile = promisify(execFileCb);
 const GITMEM_BIN = join(__dirname, "../../bin/gitmem.js");
 
 /**
+ * GIT-123: every call runs against a scratch HOME inside its own cwd, so
+ * `init`/`uninstall --all` act on <cwd>/.home/.gitmem and never on the
+ * developer's ~/.gitmem. The store (learnings, threads, ...) lives there; the
+ * repo's own .gitmem/ holds config.json and hooks only (GIT-115 layout).
+ */
+const storeOf = (cwd: string) => join(cwd, ".home", ".gitmem");
+
+/**
  * Run a gitmem CLI command as a child process
  */
 async function runGitmem(
@@ -44,8 +52,12 @@ async function runGitmem(
     SUPABASE_SERVICE_ROLE_KEY: "",
     GITMEM_TIER: "free",
     NO_COLOR: "1",
+    ...(options.cwd ? { HOME: join(options.cwd, ".home") } : {}),
+    GITMEM_HOME: "",
+    GITMEM_DIR: "",
     ...options.env,
   };
+  if (options.cwd) mkdirSync(join(options.cwd, ".home"), { recursive: true });
 
   try {
     const { stdout, stderr } = await execFile("node", [GITMEM_BIN, ...args], {
@@ -92,16 +104,16 @@ describe("Cursor: Init Clean Room", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Setup for Cursor");
-    expect(stdout).toContain("Step 1/5");
-    expect(stdout).toContain("Step 5/5");
-    // No step 6 (no permissions step for Cursor)
-    expect(stdout).not.toContain("Step 6/");
+    expect(stdout).toContain("Setting up for Cursor");
+    expect(stdout).toContain("Created ~/.gitmem");
+    expect(stdout).toContain("Created .cursorrules");
+    expect(stdout).toContain("Added automatic memory hooks");
 
-    // .gitmem/ created with starter scars
+    // Starter scars land in the store (GIT-115: ~/.gitmem, here the sandbox HOME);
+    // the repo's .gitmem/ holds config and hooks only.
     expect(existsSync(join(TEST_DIR, ".gitmem"))).toBe(true);
-    expect(existsSync(join(TEST_DIR, ".gitmem", "learnings.json"))).toBe(true);
-    const learnings = readJson(join(TEST_DIR, ".gitmem", "learnings.json"));
+    expect(existsSync(join(storeOf(TEST_DIR), "learnings.json"))).toBe(true);
+    const learnings = readJson(join(storeOf(TEST_DIR), "learnings.json"));
     expect(learnings.length).toBeGreaterThan(0);
 
     // .cursor/mcp.json created
@@ -179,11 +191,12 @@ describe("Cursor: Init Clean Room", () => {
     );
 
     expect(exitCode).toBe(0);
-    // Every step should say "Already configured" or "Skipping"
-    expect(stdout).toContain("Already configured");
+    // Every step should say it is already set up
+    expect(stdout).toContain("already set up");
+    expect(stdout).toContain("already configured");
     // Should not create anything new
-    expect(stdout).not.toContain("Created .gitmem/");
-    expect(stdout).not.toContain("Added gitmem entry");
+    expect(stdout).not.toMatch(/Created .*\.gitmem/);
+    expect(stdout).not.toContain("Configured MCP server");
     expect(stdout).not.toContain("Created .cursorrules");
   });
 
@@ -221,9 +234,7 @@ describe("Claude: Init Control Group", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Setup for Claude Code");
-    expect(stdout).toContain("Step 1/6");
-    expect(stdout).toContain("Step 6/6");
+    expect(stdout).toContain("Setting up for Claude Code");
 
     // .mcp.json at project root
     const mcpConfig = readJson(join(TEST_DIR, ".mcp.json"));
@@ -312,7 +323,7 @@ describe("Cross-Contamination Prevention", () => {
 
       // Single shared .gitmem/ directory
       expect(existsSync(join(TEST_DIR, ".gitmem"))).toBe(true);
-      expect(existsSync(join(TEST_DIR, ".gitmem", "learnings.json"))).toBe(true);
+      expect(existsSync(join(storeOf(TEST_DIR), "learnings.json"))).toBe(true);
 
       // Verify each config is correct format
       const cursorHooks = readJson(join(TEST_DIR, ".cursor", "hooks.json"));
@@ -338,8 +349,8 @@ describe("Cross-Contamination Prevention", () => {
       // Init Cursor in DIR_B
       await runGitmem(["init", "--client", "cursor", "--yes"], { cwd: DIR_B });
 
-      const scarsA = readJson(join(DIR_A, ".gitmem", "learnings.json"));
-      const scarsB = readJson(join(DIR_B, ".gitmem", "learnings.json"));
+      const scarsA = readJson(join(storeOf(DIR_A), "learnings.json"));
+      const scarsB = readJson(join(storeOf(DIR_B), "learnings.json"));
 
       // Same number of starter scars
       expect(scarsA.length).toBe(scarsB.length);
@@ -367,7 +378,7 @@ describe("Client Auto-Detection", () => {
 
       expect(exitCode).toBe(0);
       expect(stdout).toContain("auto-detected");
-      expect(stdout).toContain("Setup for Cursor");
+      expect(stdout).toContain("Setting up for Cursor");
       // Should create Cursor files
       expect(existsSync(join(TEST_DIR, ".cursor", "mcp.json"))).toBe(true);
       expect(existsSync(join(TEST_DIR, ".cursorrules"))).toBe(true);
@@ -385,7 +396,7 @@ describe("Client Auto-Detection", () => {
 
       expect(exitCode).toBe(0);
       expect(stdout).toContain("auto-detected");
-      expect(stdout).toContain("Setup for Claude Code");
+      expect(stdout).toContain("Setting up for Claude Code");
       expect(existsSync(join(TEST_DIR, ".mcp.json"))).toBe(true);
       expect(existsSync(join(TEST_DIR, "CLAUDE.md"))).toBe(true);
     } finally {
@@ -402,7 +413,7 @@ describe("Client Auto-Detection", () => {
       const { stdout, exitCode } = await runGitmem(["init", "--yes"], { cwd: TEST_DIR });
 
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("Setup for Cursor");
+      expect(stdout).toContain("Setting up for Cursor");
     } finally {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }
@@ -417,7 +428,7 @@ describe("Client Auto-Detection", () => {
       const { stdout, exitCode } = await runGitmem(["init", "--yes"], { cwd: TEST_DIR });
 
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("Setup for Claude Code");
+      expect(stdout).toContain("Setting up for Claude Code");
     } finally {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }
@@ -431,7 +442,7 @@ describe("Client Auto-Detection", () => {
       const { stdout, exitCode } = await runGitmem(["init", "--yes"], { cwd: TEST_DIR });
 
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("Setup for Claude Code");
+      expect(stdout).toContain("Setting up for Claude Code");
     } finally {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }
@@ -449,8 +460,8 @@ describe("Client Auto-Detection", () => {
       );
 
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("via --client flag");
-      expect(stdout).toContain("Setup for Cursor");
+      expect(stdout).not.toContain("auto-detected");
+      expect(stdout).toContain("Setting up for Cursor");
       // Should create Cursor files despite .claude/ existing
       expect(existsSync(join(TEST_DIR, ".cursor", "mcp.json"))).toBe(true);
     } finally {
@@ -464,7 +475,7 @@ describe("Client Auto-Detection", () => {
 
     try {
       const { stderr, exitCode } = await runGitmem(
-        ["init", "--client", "vscode", "--yes"],
+        ["init", "--client", "emacs", "--yes"],
         { cwd: TEST_DIR }
       );
 
@@ -504,13 +515,15 @@ describe("Cursor: Uninstall", () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Uninstall (Cursor)");
-    expect(stdout).toContain("Uninstall complete");
+    expect(stdout).toContain("Removing gitmem from Cursor");
+    expect(stdout).toContain("gitmem-mcp has been removed");
 
     // .cursorrules removed (was gitmem-only)
     expect(existsSync(join(TEST_DIR, ".cursorrules"))).toBe(false);
 
-    // .gitmem/ deleted (--all flag)
+    // The memory store is deleted (--all) — the sandbox one — and the repo's
+    // .gitmem/ (config + hooks) goes with it.
+    expect(existsSync(storeOf(TEST_DIR))).toBe(false);
     expect(existsSync(join(TEST_DIR, ".gitmem"))).toBe(false);
   });
 
@@ -523,10 +536,8 @@ describe("Cursor: Uninstall", () => {
       { cwd: TEST_DIR }
     );
 
-    // Cursor has 4 steps (no permissions), Claude has 5
-    expect(stdout).toContain("Step 4/4");
-    expect(stdout).not.toContain("Step 5/");
-    // Cursor uninstall has no permissions step — 4 steps total (verified above)
+    // Cursor has no permissions step
+    expect(stdout).toContain("Not needed for Cursor");
   });
 });
 

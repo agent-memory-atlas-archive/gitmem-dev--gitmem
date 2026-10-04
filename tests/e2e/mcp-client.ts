@@ -11,6 +11,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { spawn, type ChildProcess } from "child_process";
+import { assertSandboxedStore } from "../helpers/e2e-store-guard.js";
 import { join } from "path";
 
 /**
@@ -56,6 +57,9 @@ export async function createMcpClient(
     // Ensure we're in test mode
     NODE_ENV: "test",
   };
+
+  // GIT-123: never start a server whose store is the developer's own ~/.gitmem
+  assertSandboxedStore("node", [serverPath], serverEnv);
 
   // Create transport that spawns the server
   const transport = new StdioClientTransport({

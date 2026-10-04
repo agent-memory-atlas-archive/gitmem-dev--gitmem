@@ -153,10 +153,17 @@ describe.skipIf(!claudeAvailable)(
   "User Journey: Claude Agent SDK with GitMem",
   () => {
     const TEST_DIR = join(tmpdir(), `gitmem-journey-${Date.now()}`);
+    // GIT-123: the CLI, the MCP server and the hooks of the Claude session all
+    // use this store, never the developer's ~/.gitmem. process.env is inherited
+    // by the session, so it is set for this block and restored after.
+    const STORE = join(TEST_DIR, ".store");
+    const savedStoreEnv = { dir: process.env.GITMEM_DIR, home: process.env.GITMEM_HOME };
 
     beforeAll(async () => {
       if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
       mkdirSync(TEST_DIR, { recursive: true });
+      process.env.GITMEM_DIR = STORE;
+      process.env.GITMEM_HOME = "";
 
       // 1. gitmem init — creates .gitmem/ + .claude/settings.json with permissions
       await execFile("node", [GITMEM_BIN, "init", "--yes"], {
@@ -166,6 +173,8 @@ describe.skipIf(!claudeAvailable)(
           SUPABASE_URL: "",
           SUPABASE_SERVICE_ROLE_KEY: "",
           GITMEM_TIER: "free",
+          GITMEM_DIR: STORE,
+          GITMEM_HOME: "",
         },
       });
 
@@ -175,7 +184,7 @@ describe.skipIf(!claudeAvailable)(
           gitmem: {
             command: "node",
             args: [join(GITMEM_ROOT, "dist/index.js")],
-            env: { GITMEM_TIER: "free" },
+            env: { GITMEM_TIER: "free", GITMEM_DIR: STORE },
           },
         },
       };
@@ -203,12 +212,14 @@ describe.skipIf(!claudeAvailable)(
       if (!settings.hooks?.SessionStart) {
         throw new Error("Setup failed: hooks not in settings.json");
       }
-      if (!existsSync(join(TEST_DIR, ".gitmem", "learnings.json"))) {
-        throw new Error("Setup failed: .gitmem/learnings.json missing");
+      if (!existsSync(join(STORE, "learnings.json"))) {
+        throw new Error("Setup failed: learnings.json missing from the store");
       }
     }, 30_000);
 
     afterAll(() => {
+      if (savedStoreEnv.dir === undefined) delete process.env.GITMEM_DIR; else process.env.GITMEM_DIR = savedStoreEnv.dir;
+      if (savedStoreEnv.home === undefined) delete process.env.GITMEM_HOME; else process.env.GITMEM_HOME = savedStoreEnv.home;
       if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
     });
 

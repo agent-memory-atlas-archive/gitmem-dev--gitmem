@@ -26,7 +26,8 @@ import {
 } from "./mcp-client.js";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Client } from "pg";
-import { readFileSync } from "fs";
+import { readFileSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 
 // This test requires Docker - probe for a working container runtime
@@ -42,6 +43,7 @@ try {
 describe.skipIf(!DOCKER_AVAILABLE)("Pro Tier - Fresh Install E2E", () => {
   let container: StartedPostgreSqlContainer;
   let pgClient: Client;
+  let sandboxHome = "";
   let mcpClient: McpTestClient;
 
   beforeAll(async () => {
@@ -80,7 +82,12 @@ describe.skipIf(!DOCKER_AVAILABLE)("Pro Tier - Fresh Install E2E", () => {
     console.log("[e2e] Schema loaded and starter scars seeded");
 
     // Create MCP client pointing to the test database
+    // GIT-123: the server's store is a scratch dir, never the developer's ~/.gitmem
+    sandboxHome = mkdtempSync(join(tmpdir(), "gitmem-pro-home-"));
     mcpClient = await createMcpClient({
+      HOME: sandboxHome,
+      GITMEM_HOME: "",
+      GITMEM_DIR: join(sandboxHome, ".gitmem"),
       SUPABASE_URL: container.getConnectionUri(),
       SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
       GITMEM_TIER: "pro",
@@ -92,6 +99,7 @@ describe.skipIf(!DOCKER_AVAILABLE)("Pro Tier - Fresh Install E2E", () => {
     if (mcpClient) {
       await mcpClient.cleanup();
     }
+    if (sandboxHome) rmSync(sandboxHome, { recursive: true, force: true });
     if (pgClient) {
       await pgClient.end();
     }

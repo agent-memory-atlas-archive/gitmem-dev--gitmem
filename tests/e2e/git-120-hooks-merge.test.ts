@@ -23,7 +23,7 @@ async function gitmem(args: string[], cwd: string, home: string) {
   try {
     const { stdout, stderr } = await execFile("node", [GITMEM_BIN, ...args], {
       cwd,
-      env: { ...process.env, HOME: home, NO_COLOR: "1", SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "", GITMEM_TIER: "free" },
+      env: { ...process.env, HOME: home, GITMEM_DIR: "", GITMEM_HOME: "", NO_COLOR: "1", SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "", GITMEM_TIER: "free" },
       timeout: 30_000,
     });
     return { stdout, stderr, code: 0 };

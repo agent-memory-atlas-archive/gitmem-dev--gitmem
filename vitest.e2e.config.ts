@@ -26,6 +26,9 @@ export default defineConfig({
       },
     },
 
+    // GIT-123: refuse any gitmem child process whose store is not under os.tmpdir()
+    setupFiles: ["tests/e2e/setup-store-guard.ts"],
+
     // Environment
     environment: "node",
 
