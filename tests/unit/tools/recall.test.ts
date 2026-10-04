@@ -21,13 +21,9 @@ vi.mock("../../../src/services/tier.js", () => ({
   hasMetrics: () => false,
   hasProInsights: () => false,
   hasCacheManagement: () => true,
-  hasCompliance: () => false,
   hasTranscripts: () => false,
   hasBatchOperations: () => false,
   hasEmbeddings: () => true,
-  hasAdvancedAgentDetection: () => false,
-  hasMultiProject: () => false,
-  hasEnforcementFields: () => false,
   getTablePrefix: () => "gitmem_",
   getTableName: (base: string) => `gitmem_${base}`,
 }));

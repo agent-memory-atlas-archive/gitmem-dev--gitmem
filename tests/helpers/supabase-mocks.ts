@@ -17,15 +17,11 @@ export const SUPABASE_TIER_MOCKS = {
   hasTranscripts: vi.fn(() => false), // Avoid transcript capture complexity in most tests
   hasCacheManagement: vi.fn(() => true),
   hasVariants: vi.fn(() => true),
-  hasCompliance: vi.fn(() => false),
   hasEmbeddings: vi.fn(() => true),
   hasMetrics: vi.fn(() => true),
   hasProInsights: vi.fn(() => true),
   getTier: vi.fn(() => "pro" as const),
   resetTier: vi.fn(),
-  hasAdvancedAgentDetection: vi.fn(() => false),
-  hasMultiProject: vi.fn(() => false),
-  hasEnforcementFields: vi.fn(() => false),
   getTablePrefix: vi.fn(() => "orchestra_"),
   getTableName: vi.fn((base: string) => `orchestra_${base}`),
 };
