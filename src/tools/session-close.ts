@@ -954,6 +954,25 @@ export async function sessionClose(
   // GIT-122: the id the caller asked for, before any merge or recovery can
   // touch params. An explicit id is either the session that gets closed or the
   // call is refused. Logged raw so the next occurrence is diagnosable.
+  //
+  // `gitmem_session_id` is the same id under a name a proxy will not claim: the
+  // Claude remote-devices bridge strips a parameter called `session_id`, so the
+  // 2026-10-04 close arrived with no id at all. If both are given and differ,
+  // refuse.
+  if (params.gitmem_session_id) {
+    if (params.session_id && !sessionIdsMatch(params.session_id, params.gitmem_session_id)) {
+      console.error(`[session_close] incoming session_id=${params.session_id} gitmem_session_id=${params.gitmem_session_id}`);
+      return refuseClose(
+        params,
+        "",
+        `session_id ${params.session_id} and gitmem_session_id ${params.gitmem_session_id} name different sessions. ` +
+          `Pass one of them, or the same id in both. Nothing was written.`,
+        timer,
+      );
+    }
+    const { gitmem_session_id: alias, ...rest } = params;
+    params = { ...rest, session_id: params.session_id || alias };
+  }
   const requestedId: string | undefined = params.session_id || undefined;
   console.error(`[session_close] incoming session_id=${requestedId ?? "(none)"}`);
 

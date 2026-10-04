@@ -94,6 +94,9 @@ export const SessionCloseParamsSchema = z.object({
   // could never execute. The agent had to already know the id, which is exactly
   // what a restart (and context compaction) takes away.
   session_id: SessionIdSchema.optional(),
+  // GIT-122: same id under a name a proxy will not claim (the remote-devices
+  // bridge strips `session_id`). Both given and different is refused at close.
+  gitmem_session_id: SessionIdSchema.optional(),
   close_type: CloseTypeSchema,
   task_completion: TaskCompletionSchema.optional(),
   closing_reflection: ClosingReflectionSchema.optional(),

@@ -336,3 +336,59 @@ describe("closing payload is scoped per session (GIT-122)", () => {
     expect(fs.existsSync(path.join(root.dir, "closing-payload.json"))).toBe(true);
   });
 });
+
+describe("gitmem_session_id alias (GIT-122)", () => {
+  // The remote-devices bridge drops a parameter named `session_id`; the alias carries the same id.
+  it("alias alone closes that session, even when the process is bound to another", async () => {
+    store.rows[A] = open(A);
+    store.rows[B] = open(B);
+    bound.id = B;
+    live.list = () => [{ session_id: B }];
+
+    const result = await sessionClose({ gitmem_session_id: A, close_type: "quick" });
+
+    expect(written()).toEqual([A]);
+    expect(result.session_id).toBe(A);
+  });
+
+  it("both given and equal: closes it", async () => {
+    store.rows[A] = open(A);
+    await sessionClose({ session_id: A, gitmem_session_id: A, close_type: "quick" });
+    expect(written()).toEqual([A]);
+  });
+
+  it("both given and different: refused, nothing written, both ids named", async () => {
+    store.rows[A] = open(A);
+    store.rows[B] = open(B);
+
+    const result = await sessionClose({ session_id: A, gitmem_session_id: B, close_type: "quick" });
+
+    expect(result.success).toBe(false);
+    expect(result.validation_errors!.join(" ")).toContain(A.slice(0, 8));
+    expect(result.validation_errors!.join(" ")).toContain(B.slice(0, 8));
+    expect(written()).toEqual([]);
+  });
+
+  it("alias is subject to the same checks: a closed session is refused", async () => {
+    store.rows[A] = closed(A);
+    const result = await sessionClose({ gitmem_session_id: A, close_type: "quick" });
+    expect(result.success).toBe(false);
+    expect(written()).toEqual([]);
+  });
+
+  it("a malformed alias is rejected, not ignored", async () => {
+    store.rows[B] = open(B);
+    bound.id = B;
+    const result = await sessionClose({ gitmem_session_id: "../../etc/passwd", close_type: "quick" });
+    expect(result.success).toBe(false);
+    expect(written()).toEqual([]);
+  });
+
+  it("the alias id is logged on entry", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    store.rows[A] = open(A);
+    await sessionClose({ gitmem_session_id: A, close_type: "quick" });
+    expect(err.mock.calls.map((c) => String(c[0]))).toContain(`[session_close] incoming session_id=${A}`);
+    err.mockRestore();
+  });
+});

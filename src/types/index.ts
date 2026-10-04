@@ -271,6 +271,8 @@ export interface SessionDecision {
 
 export interface SessionCloseParams {
   session_id: string;
+  /** GIT-122: alias of session_id for clients/proxies that strip a parameter named session_id. */
+  gitmem_session_id?: string;
   close_type: CloseType;
   /** Task completion proof - REQUIRED for standard close */
   task_completion?: TaskCompletion;
