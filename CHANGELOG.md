@@ -7,36 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [1.11.2] - 2026-10-04
 
-- `session_close` now closes the session you name, or refuses (GIT-122). On 2026-10-04 a close that
-  named one session landed on another, already-closed one and overwrote its close. The Claude
-  remote-devices bridge strips a parameter called `session_id`, so the server received no id and
-  silently fell back to its own bound session. Now: `session_close` accepts the same id as
-  `gitmem_session_id`, a name a proxy will not claim (if both are given and differ, it refuses);
-  closing a session that is already closed is refused unless you pass `reclose: true`; a call with no
-  id is refused while several sessions are live; a resolved id that differs from the requested one is
-  refused before anything is written; the result and display show the full id actually written; and
-  the incoming id is logged to stderr. `closing-payload.json` now lives in the session's own folder
-  (`sessions/<id>/closing-payload.json`) and is refused if it names another session. The old shared
-  file at the store root is still read for one release when it carries a `session_id` naming the
-  session being closed (the Stop hook, `gitmem init` and the agent templates now tell agents to
-  include it), or, with no `session_id`, only while a single session is live.
-- Running the e2e suite no longer deletes your real `~/.gitmem`. `cursor-cross-tool.test.ts` ran
-  `gitmem uninstall --all` with your real HOME, and `--all` removes the memory store (session
-  registry, per-session files, local `threads.json`, closing payloads). Those tests now run against
-  a scratch HOME, and every e2e helper is guarded: any gitmem CLI or server process whose store
-  resolves outside `os.tmpdir()` is refused before it starts. The other e2e files that used your
-  real store (`pro-fresh`, `pro-mature`, `user-journey`, `organic-discovery`, `git-120`) are
-  sandboxed too, and the cursor tests assert the GIT-115 layout. Test-only change; the product
-  and `uninstall --all` are unchanged. (GIT-123)
-- `session_close` no longer reports every open thread as failed when a session is closed a second
-  time (or closed after the server restarted). Threads stored on the session row come back as JSON
-  strings, and they were handed to the Supabase thread sync without being parsed, so each one had no
-  id and the sync threw `Cannot read properties of undefined (reading 'includes')`. The close
-  returned `PARTIAL` with `undefined (...)` entries for all of them. The stored threads are now
-  parsed first, and a thread with no id fails with a clear message instead of an opaque error.
-  No data was lost: the unsynced threads stayed in `threads.json` and were retried by the next close.
+**Just upgrade the package. Nothing to change on your database.** No schema change; setup.sql is
+untouched, and this release was checked against a project on the 1.8.0 `setup.sql` and on the
+current one.
+
+**`session_close` closes the session you name, or refuses.** On 2026-10-04 a close that named one
+session landed on another, already-closed one and overwrote its close. The Claude remote-devices
+bridge strips a parameter called `session_id`, so the server received no id and silently fell back
+to the session it was bound to. Now:
+
+- `session_close` accepts the same id as `gitmem_session_id`, a name a proxy will not claim. If
+  both are given and differ, it refuses. Prefer `gitmem_session_id`.
+- Closing a session that is already closed is refused unless you pass `reclose: true`. A close that
+  only partly saved (some threads did not sync) can still be retried.
+- A close with no id is refused while several sessions are live on the machine, and the live ones
+  are listed. It used to guess.
+- A resolved id that differs from the requested one is refused before anything is written, and the
+  result and display show the full id actually written. The incoming id is logged to stderr.
+- `closing-payload.json` now lives in the session's own folder (`sessions/<id>/closing-payload.json`)
+  and is refused if it names another session. The old shared file at the store root is still read
+  for one release when it carries a `session_id` naming the session being closed (the Stop hook,
+  `gitmem init` and the agent templates now tell agents to include it), or, with no `session_id`,
+  only while a single session is live. (GIT-122, #69)
+
+**Closing a session twice no longer fails every thread.** `session_close` reported every open
+thread as failed when a session was closed a second time, or closed after the server restarted.
+Threads stored on the session row come back as JSON strings and were handed to the Supabase thread
+sync unparsed, so each had no id and the sync threw
+`Cannot read properties of undefined (reading 'includes')`. The close returned `PARTIAL` with
+`undefined (...)` entries. Stored threads are now parsed first, and a thread with no id fails with a
+clear message. No data was lost: the unsynced threads stayed in `threads.json` and the next close
+retried them. (#67)
+
+**For contributors: running the e2e suite no longer deletes your real `~/.gitmem`.**
+`cursor-cross-tool.test.ts` ran `gitmem uninstall --all` with your real HOME, and `--all` removes
+the memory store. Those tests now run against a scratch HOME, every e2e helper refuses a gitmem
+process whose store is outside `os.tmpdir()`, and the other e2e files that used your real store are
+sandboxed too. Test-only change; the product and `uninstall --all` are unchanged. (GIT-123, #68)
 
 ## [1.11.1] - 2026-09-22
 
