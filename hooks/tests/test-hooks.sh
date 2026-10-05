@@ -688,6 +688,11 @@ PAYLOAD_EXPECTED="$GITMEM_DIR/closing-payload.json"
 echo "$OUTPUT" | grep -qF "WRITE structured payload to $PAYLOAD_EXPECTED (this exact absolute path" \
     && pass "Stop hook text prints the resolved absolute payload path" \
     || fail "Stop hook payload path" "$PAYLOAD_EXPECTED" "$OUTPUT"
+# GIT-122: the instruction tells the agent to put its own session_id in the
+# payload, because the shared root file is only read when it names its session.
+echo "$OUTPUT" | grep -qF 'with \"session_id\" (YOUR session id from session_start' \
+    && pass "Stop hook text tells the agent to include session_id in the payload" \
+    || fail "Stop hook session_id instruction" 'with "session_id" (YOUR session id' "$OUTPUT"
 echo "$OUTPUT" | (command -v node >/dev/null && node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{JSON.parse(d)})' 2>/dev/null) \
     && pass "Stop hook output with the path is valid JSON" \
     || fail "Stop hook JSON" "parseable JSON" "$OUTPUT"

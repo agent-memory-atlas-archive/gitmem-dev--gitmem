@@ -149,7 +149,8 @@ vi.mock("../../../src/services/thread-suggestions.js", () => ({
 import { sessionClose } from "../../../src/tools/session-close.js";
 
 const SID = "393adb34-a80c-4c3a-b71a-bc0053b7a7ea";
-const payloadFile = () => path.join(root.dir, "closing-payload.json");
+// GIT-122: the payload lives in the closing session's own folder.
+const payloadFile = () => path.join(root.dir, "sessions", SID, "closing-payload.json");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -175,6 +176,7 @@ describe("session_close missing payload (GIT-99)", () => {
   });
 
   it("an unparseable payload is reported as found-but-unreadable, at its path", async () => {
+    fs.mkdirSync(path.dirname(payloadFile()), { recursive: true });
     fs.writeFileSync(payloadFile(), "{ not json");
     const result = await sessionClose({ session_id: SID, close_type: "standard" });
 
@@ -192,6 +194,7 @@ describe("session_close missing payload (GIT-99)", () => {
   });
 
   it("a payload at the path is consumed", async () => {
+    fs.mkdirSync(path.dirname(payloadFile()), { recursive: true });
     fs.writeFileSync(payloadFile(), JSON.stringify({ closing_reflection: { what_broke: "x", what_worked: "y", scars_applied: [] } }));
     const result = await sessionClose({ session_id: SID, close_type: "standard" });
     expect((result.validation_errors || []).join(" ")).not.toContain("closing-payload.json");

@@ -184,6 +184,10 @@ export const TOOLS = [
           type: "string",
           description: "Session ID from session_start",
         },
+        gitmem_session_id: {
+          type: "string",
+          description: "Same as session_id — prefer this one. Some MCP clients and proxies strip a parameter named session_id, so the close would not know which session you mean. If both are given and differ, the close is refused.",
+        },
         close_type: {
           type: "string",
           enum: ["standard", "quick", "autonomous"],
@@ -205,8 +209,12 @@ export const TOOLS = [
           type: "number",
           description: "End-to-end ceremony duration from agent perspective (in milliseconds)",
         },
+        reclose: {
+          type: "boolean",
+          description: "Replace the close of a session that is already closed. Without it, closing a closed session is refused.",
+        },
       },
-      required: ["session_id", "close_type"],
+      required: ["close_type"],
     },
   },
   {

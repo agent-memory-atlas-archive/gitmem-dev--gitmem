@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `session_close` now closes the session you name, or refuses (GIT-122). On 2026-10-04 a close that
+  named one session landed on another, already-closed one and overwrote its close. The Claude
+  remote-devices bridge strips a parameter called `session_id`, so the server received no id and
+  silently fell back to its own bound session. Now: `session_close` accepts the same id as
+  `gitmem_session_id`, a name a proxy will not claim (if both are given and differ, it refuses);
+  closing a session that is already closed is refused unless you pass `reclose: true`; a call with no
+  id is refused while several sessions are live; a resolved id that differs from the requested one is
+  refused before anything is written; the result and display show the full id actually written; and
+  the incoming id is logged to stderr. `closing-payload.json` now lives in the session's own folder
+  (`sessions/<id>/closing-payload.json`) and is refused if it names another session. The old shared
+  file at the store root is still read for one release when it carries a `session_id` naming the
+  session being closed (the Stop hook, `gitmem init` and the agent templates now tell agents to
+  include it), or, with no `session_id`, only while a single session is live.
 - Running the e2e suite no longer deletes your real `~/.gitmem`. `cursor-cross-tool.test.ts` ran
   `gitmem uninstall --all` with your real HOME, and `--all` removes the memory store (session
   registry, per-session files, local `threads.json`, closing payloads). Those tests now run against
