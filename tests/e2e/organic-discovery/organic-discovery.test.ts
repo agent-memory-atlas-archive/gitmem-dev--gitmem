@@ -326,7 +326,7 @@ function setupTestDir(configId: string, runNumber: number, hooksConfig: HooksCon
       gitmem: {
         command: "node",
         args: [join(GITMEM_ROOT, "dist/index.js")],
-        env: { GITMEM_TIER: "free" },
+        env: { GITMEM_TIER: "free", GITMEM_DIR: join(testDir, ".store") },
       },
     },
   };
@@ -380,6 +380,13 @@ async function runConfigChain(
   const testDir = setupTestDir(config.id, runNumber, hooksConfig);
   const memoryMdPath = join(testDir, "MEMORY.md");
 
+  // GIT-123: the Claude session, its MCP server and its hooks use a store inside
+  // the test dir, never the developer's ~/.gitmem. The session inherits
+  // process.env, so it is set for the chain and restored in the finally.
+  const savedStoreEnv = { dir: process.env.GITMEM_DIR, home: process.env.GITMEM_HOME };
+  process.env.GITMEM_DIR = join(testDir, ".store");
+  process.env.GITMEM_HOME = "";
+
   const sessionResults: SessionMetrics[] = [];
 
   try {
@@ -414,6 +421,8 @@ async function runConfigChain(
       sessionResults.push(metrics);
     }
   } finally {
+    if (savedStoreEnv.dir === undefined) delete process.env.GITMEM_DIR; else process.env.GITMEM_DIR = savedStoreEnv.dir;
+    if (savedStoreEnv.home === undefined) delete process.env.GITMEM_HOME; else process.env.GITMEM_HOME = savedStoreEnv.home;
     cleanupTestDir(testDir);
   }
 
